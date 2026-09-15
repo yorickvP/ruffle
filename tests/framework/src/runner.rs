@@ -237,8 +237,10 @@ impl TestRunner {
         if self.options.num_ticks.is_some() {
             self.player.lock().unwrap().tick(self.frame_time);
         } else {
-            self.player.lock().unwrap().run_frame();
-            self.player.lock().unwrap().update_timers(self.frame_time);
+            self.player
+                .lock()
+                .unwrap()
+                .run_frame_with_timers(self.frame_time);
             self.player.lock().unwrap().audio_mut().tick();
         }
         self.remaining_iterations -= 1;

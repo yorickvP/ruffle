@@ -1,0 +1,17 @@
+tick 1: onEnterFrame sees clip._currentframe = 2
+tick 2: onEnterFrame sees clip._currentframe = 3
+tick 3: onEnterFrame sees clip._currentframe = 1
+tick 4: onEnterFrame sees clip._currentframe = 2
+timer 1: clip.gotoAndPlay(1); clip._currentframe = 1
+tick 5: onEnterFrame sees clip._currentframe = 1
+tick 6: onEnterFrame sees clip._currentframe = 2
+tick 7: onEnterFrame sees clip._currentframe = 3
+tick 8: onEnterFrame sees clip._currentframe = 1
+tick 9: onEnterFrame sees clip._currentframe = 2
+timer 2: clip.gotoAndPlay(1); clip._currentframe = 1
+tick 10: onEnterFrame sees clip._currentframe = 1
+tick 11: onEnterFrame sees clip._currentframe = 2
+tick 12: onEnterFrame sees clip._currentframe = 3
+tick 13: onEnterFrame sees clip._currentframe = 1
+tick 14: onEnterFrame sees clip._currentframe = 2
+done

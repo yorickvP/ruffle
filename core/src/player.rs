@@ -558,7 +558,12 @@ impl Player {
 
         while frame < max_frames_per_tick && self.frame_accumulator >= frame_duration {
             let timer = Instant::now();
-            self.run_frame();
+            if frame == 0 {
+                // Timers fire as part of the frame, see `run_frame_with_timers`.
+                self.run_frame_with_timers(dt);
+            } else {
+                self.run_frame();
+            }
             let elapsed = timer.elapsed().as_millis() as f64;
 
             self.add_frame_timing(elapsed);
@@ -606,7 +611,10 @@ impl Player {
 
         self.update_sockets();
         self.update_net_connections();
-        self.update_timers(dt);
+        if frame == 0 {
+            // No frame ran during this tick, so the timers haven't been updated yet.
+            self.update_timers(dt);
+        }
         self.update(|context| {
             StreamManager::tick(context, dt);
         });
@@ -2048,8 +2056,43 @@ impl Player {
         })
     }
 
-    #[instrument(level = "debug", skip_all)]
+    /// Runs a single frame of the movie, without touching the timers.
     pub fn run_frame(&mut self) {
+        self.run_frame_inner(None);
+    }
+
+    /// Runs a single frame of the movie, and fires the timers that became due
+    /// during `dt` as part of that frame.
+    ///
+    /// Flash Player polls its timers every 10-20ms, independently of the
+    /// frame rate. When a poll coincides with a frame, the timelines advance
+    /// to their next frame first, then the due `setInterval`/`setTimeout`
+    /// callbacks run, and only then do the actions queued by the advance
+    /// (frame scripts, `onEnterFrame` handlers, clip events) run. This is
+    /// observable from AVM1: an `onEnterFrame` handler sees the frame that a
+    /// timer callback just jumped to, rather than the frame after it, and a
+    /// timer callback sees the frame the timeline has just advanced to.
+    ///
+    /// Ticks that don't run a frame should still call `update_timers`, so
+    /// that timers keep firing between frames as they do in Flash.
+    ///
+    /// If the frame can't run yet (e.g. the movie is still preloading), the
+    /// timers are updated on their own instead.
+    pub fn run_frame_with_timers(&mut self, dt: FloatDuration) {
+        if !self.run_frame_inner(Some(dt)) {
+            self.update_timers(dt);
+        }
+    }
+
+    /// Runs a single frame of the movie.
+    ///
+    /// If `timer_dt` is given, the timers are advanced by that duration in the
+    /// middle of the frame (see `run_frame_with_timers`).
+    ///
+    /// Returns `false` if the frame did not run because the movie is still
+    /// preloading.
+    #[instrument(level = "debug", skip_all)]
+    fn run_frame_inner(&mut self, timer_dt: Option<FloatDuration>) -> bool {
         let frame_time = self.frame_time(750_000_000.0);
         let frame_time = Duration::from_nanos(frame_time as u64);
         let (mut execution_limit, may_execute_while_streaming) = match self.load_behavior {
@@ -2066,13 +2109,18 @@ impl Player {
         let preload_finished = self.preload(&mut execution_limit);
 
         if !preload_finished && !may_execute_while_streaming {
-            return;
+            return false;
         }
 
-        self.update(|context| {
+        let time_til_next_timer = self.update(|context| {
             // TODO: Is this order correct?
             run_all_phases_avm2(context);
             Avm1::run_frame(context);
+
+            // The AVM1 timelines have advanced, but the actions they queued
+            // haven't run yet: this is when Flash fires timer callbacks.
+            let time_til_next_timer = timer_dt.map(|dt| Timers::update_timers(context, dt));
+
             AudioManager::update_sounds(context);
             LocalConnections::update_connections(context);
 
@@ -2081,9 +2129,15 @@ impl Player {
             for cb in std::mem::take(context.post_frame_callbacks) {
                 (cb.callback)(context, cb.data);
             }
+
+            time_til_next_timer
         });
+        if let Some(time_til_next_timer) = time_til_next_timer {
+            self.time_til_next_timer = time_til_next_timer;
+        }
 
         self.needs_render = true;
+        true
     }
 
     #[instrument(level = "debug", skip_all)]
